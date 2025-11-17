@@ -33,21 +33,25 @@ apollo_initialise()
 
 get_script_path <- function(){
   p <- NULL
-  if (requireNamespace("rstudioapi", quietly = TRUE)) {
-    # Use condition-aware handlers to avoid signature mismatches when errors surface
-    if (tryCatch(rstudioapi::isAvailable(), error = function(e) FALSE)) {
-      p <- tryCatch(rstudioapi::getActiveDocumentContext()$path,
-                    error = function(e) NULL)
-    }
+
+  # Prefer the active document path when running inside RStudio
+  if (requireNamespace("rstudioapi", quietly = TRUE) && isTRUE(rstudioapi::isAvailable())) {
+    p_try <- try(rstudioapi::getActiveDocumentContext()$path, silent = TRUE)
+    if (!inherits(p_try, "try-error") && is.character(p_try) && nzchar(p_try)) p <- p_try
   }
+
+  # Fall back to --file argument when sourced via Rscript
   if (is.null(p) || !nzchar(p)) {
     args <- commandArgs(trailingOnly = FALSE)
     fileArg <- grep("^--file=", args, value = TRUE)
     if (length(fileArg) > 0) p <- sub("^--file=", "", fileArg[1])
   }
+
+  # Final fallback: current working directory
   if (is.null(p) || !nzchar(p)) {
     p <- normalizePath(".", winslash = "/", mustWork = FALSE)
   }
+
   normalizePath(p, winslash = "/", mustWork = FALSE)
 }
 
@@ -220,7 +224,7 @@ mmnl_model <- function(processed_path = NULL, output_dir = "output"){
   apollo_probabilities <- function(apollo_beta, apollo_inputs, functionality = "estimate"){
 
     apollo_attach(apollo_beta, apollo_inputs)
-    on.exit(apollo_detach(apollo_beta, apollo_inputs))
+    on.exit(apollo_detach(apollo_beta, apollo_inputs), add = TRUE)
 
     randcoeff <- apollo_randCoeff(apollo_beta, apollo_inputs)
     b_time <- randcoeff$b_time
@@ -276,6 +280,8 @@ mmnl_model <- function(processed_path = NULL, output_dir = "output"){
   ### STEP 7 – Estimate MMNL model and save output
   ### ========================================================
 
+  # Call Apollo once without additional tryCatch wrappers so any estimation
+  # issues surface directly.
   mmnl_model <- apollo_estimate(apollo_beta, apollo_fixed,
                                 apollo_probabilities, apollo_inputs)
 
