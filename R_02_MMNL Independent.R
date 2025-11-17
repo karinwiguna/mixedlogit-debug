@@ -208,33 +208,13 @@ apollo_randCoeff <- function(apollo_beta, apollo_inputs){
 apollo_probabilities <- function(apollo_beta, apollo_inputs, functionality = "estimate"){
 
   apollo_attach(apollo_beta, apollo_inputs)
-  on.exit(apollo_detach(apollo_beta, apollo_inputs))
-
-  randcoeff <- apollo_randCoeff(apollo_beta, apollo_inputs)
-  b_time <- randcoeff$b_time
-  b_cost <- randcoeff$b_cost
+  on.exit(apollo_detach(apollo_beta, apollo_inputs), add = TRUE)
 
   V <- list()
-  V[["car"]]  = 0 +
-    b_time  * (time   * (alt == "car")) +
-    b_cost  * (cost   * (alt == "car"))
-  V[["bus"]]  =
-    asc_bus +
-    b_time  * (time   * (alt == "bus")) +
-    b_cost  * (cost   * (alt == "bus")) +
-    b_access* (access * (alt == "bus"))
-  V[["air"]]  =
-    asc_air +
-    b_time  * (time   * (alt == "air")) +
-    b_cost  * (cost   * (alt == "air")) +
-    b_access* (access * (alt == "air")) +
-    b_service*(service* (alt == "air"))
-  V[["rail"]] =
-    asc_rail +
-    b_time  * (time   * (alt == "rail")) +
-    b_cost  * (cost   * (alt == "rail")) +
-    b_access* (access * (alt == "rail")) +
-    b_service*(service* (alt == "rail"))
+  V[["car"]]  = 0 + b_time  * (time   * (alt == "car")) + b_cost  * (cost   * (alt == "car"))
+  V[["bus"]]  = asc_bus + b_time  * (time   * (alt == "bus")) + b_cost  * (cost   * (alt == "bus")) + b_access* (access * (alt == "bus"))
+  V[["air"]]  = asc_air + b_time  * (time   * (alt == "air")) + b_cost  * (cost   * (alt == "air")) + b_access* (access * (alt == "air")) + b_service*(service* (alt == "air"))
+  V[["rail"]] = asc_rail + b_time  * (time   * (alt == "rail")) + b_cost  * (cost   * (alt == "rail")) + b_access* (access * (alt == "rail")) + b_service*(service* (alt == "rail"))
 
   avail_list <- list(car = 1, bus = 1, air = 1, rail = 1)
 
@@ -247,10 +227,15 @@ apollo_probabilities <- function(apollo_beta, apollo_inputs, functionality = "es
 
   P <- list()
   P[["model"]] <- apollo_mnl(mnl_settings, functionality)
+  # Panel product over repeated observations for each individual
   P <- apollo_panelProd(P, apollo_inputs, functionality)
+  # Mixed logit (average over draws)
+  P <- apollo_avgInterDraws(P, apollo_inputs, functionality)
+  # Final preparation of probabilities
   P <- apollo_prepareProb(P, apollo_inputs, functionality)
-
+  
   return(P)
+  
 }
 
 
