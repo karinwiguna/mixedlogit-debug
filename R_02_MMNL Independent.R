@@ -79,6 +79,11 @@ candidate_paths <- c(
   file.path(.script_dir,   "modechoice_long.csv"),
   file.path(.project_root, "modechoice_long.csv")
 )
+hit <- which(file.exists(candidate_paths))
+if (length(hit) == 0) {
+  cat("Checked these paths:\n"); print(candidate_paths)
+  stop("modechoice_long.csv not found. Make sure DATA/processed is in the right place.")
+}
 
 data_path <- candidate_paths[hit[1]]
 cat("Using data file:\n", data_path, "\n")
