@@ -48,7 +48,7 @@ get_script_path <- function(){
     }
   }
   if (is.null(p) || !nzchar(p)) {
-    # fallback jika run via terminal/source
+    # fallback if run via terminal/source
     args <- commandArgs(trailingOnly = FALSE)
     fileArg <- grep("^--file=", args, value = TRUE)
     if (length(fileArg) > 0) p <- sub("^--file=", "", fileArg[1])
@@ -61,11 +61,11 @@ get_script_path <- function(){
 .script_dir   <- if (dir.exists(.script_path)) .script_path else dirname(.script_path)
 .project_root <- normalizePath(file.path(.script_dir, ".."), winslash = "/", mustWork = FALSE)
 
-# Buat path data tanpa setwd:
+# Create the data path without using setwd:
 cat(".script_dir   : ", .script_dir, "\n")
 cat(".project_root : ", .project_root, "\n")
 
-# Coba beberapa kemungkinan lokasi DATA:
+# Try several possible DATA locations:
 candidates <- c(
   file.path(.script_dir,   "DATA", "processed", "modechoice_long.csv"), # DATA di dalam folder skrip (kasusmu)
   file.path(.project_root, "DATA", "processed", "modechoice_long.csv"), # DATA di parent
@@ -84,7 +84,7 @@ cat("Using data file:\n", data_path, "\n")
 # 1) Load data via portable path
 database <- readr::read_csv(data_path, show_col_types = FALSE)
 
-# 2) Cek cepat
+# 2) Quick Check
 cat("\nColumns available in dataset:\n"); print(names(database))
 cat("\nMissing values summary:\n"); print(colSums(is.na(database)))
 
@@ -101,15 +101,15 @@ database <- database %>%
 cat("Names in database:\n"); print(names(database))
 cat("Class of keys in database:\n"); print(sapply(database[,c("ID","choice_id")], class))
 
-# Pastikan 'choice' benar2 ada dan numeric/binary
+# Ensure the ‘choice’ column actually exists and is numeric/binary
 stopifnot("choice" %in% names(database))
 
-# Take choices per (ID, choice_id) from baris yang choice==1, lalu lekatkan ke semua baris choice set tsb
+# Take the chosen alternative per (ID, choice_id) from rows where choice == 1, then attach it to all rows in that choice set
 choice_map <- database %>%
   group_by(ID, choice_id) %>%
   summarise(
     .groups = "drop",
-    # baris pilihan (kalau tidak ada 1, tetap ambil idx max -> asumsi ada satu alt terpilih)
+    # Select the chosen row (if no row has choice == 1, use the row with the max index → assuming one alternative is always selected)
     idx = which.max(choice),
     alt_sel = tolower(trimws(alt[idx])),
     choice_num = unname(alt_map[alt_sel])
@@ -119,7 +119,7 @@ choice_map <- database %>%
 cat("Head of choice_map:\n"); print(head(choice_map))
 cat("Class of keys in choice_map:\n"); print(sapply(choice_map[,c("ID","choice_id")], class))
 
-# Samakan tipe key dulu
+# Make sure the key types match first
 database <- database %>%
   mutate(
     ID = as.integer(ID),
@@ -132,18 +132,18 @@ choice_map <- choice_map %>%
     choice_id = as.integer(choice_id)
   )
 
-# Bersihkan sisa kolom choice_num lama (kalau ada), lalu JOIN dengan suffix jelas
+# Remove any old ‘choice_num’ columns (if they exist), then JOIN using clear suffixes
 database <- database %>%
   select(-dplyr::any_of("choice_num")) %>%
   left_join(choice_map, by = c("ID","choice_id"), suffix = c("", ".cm"))
 
-# Jika kolom dari choice_map bernama choice_num.cm, normalkan kembali jadi 'choice_num'
+# If the column from choice_map is named ‘choice_num.cm’, normalize it back to ‘choice_num
 if (("choice_num.cm" %in% names(database)) && !("choice_num" %in% names(database))) {
   database <- database %>%
     dplyr::rename(choice_num = `choice_num.cm`)
 }
 
-# Diagnostik jika tetap tidak ada choice_num
+# Run diagnostics if ‘choice_num’ is still missing
 if (!("choice_num" %in% names(database))) {
   cat("\n[DIAGNOSTIC] Keys present in database but missing in choice_map (showing 10):\n")
   miss_keys <- dplyr::anti_join(
@@ -155,14 +155,14 @@ if (!("choice_num" %in% names(database))) {
   stop("choice_num missing after join. Kemungkinan: (1) 'choice_id' tidak ada/berbeda; (2) tipe data key beda; (3) nilai key tidak match.")
 }
 
-# Cek NA pada choice_num
+# Check for NAs in ‘choice_num
 if (any(is.na(database$choice_num))) {
   bad <- database %>% dplyr::filter(is.na(choice_num)) %>% dplyr::distinct(ID, choice_id) %>% head(10)
   print(bad)
   stop("Found NA in choice_num. Cek apakah 'alt' hanya {car,bus,air,rail} dan tiap (ID,choice_id) punya tepat satu pilihan (choice==1).")
 }
 
-# Pastikan integer
+# Ensure it is an integer
 database$choice_num <- as.integer(database$choice_num)
 
 # --- make sure choice_num exists & is clean
@@ -309,4 +309,5 @@ apollo_saveOutput(mnl_model)
 # - Extremely negative l_time (→ b_time ≈ 0) may indicate rescaling is needed
 # - If signs and magnitudes are reasonable, proceed to R02_MixedLogit for random parameters
 ##############################################################
+
 
