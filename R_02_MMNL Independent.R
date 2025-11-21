@@ -19,14 +19,6 @@
 ### STEP 0 – Load packages and initialise Apollo
 ### ==========================================================
 
-## --- Hard-reset the error handler to the correct form
-options(error = function(e) {
-  # Print it first so we can see if there's a real error
-  print(e)
-  stop(e)  # Then rethrow the error
-})
-
-
 library(apollo)
 library(readr)
 library(dplyr)
