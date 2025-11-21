@@ -85,10 +85,10 @@ avail_long <- data_wide %>%
 ### 4. CREATE CHOICE IDENTIFIERS
 ### ==========================================================
 
-# mapping alternatif → angka (biar bisa dipakai untuk dummy 0/1)
+# Map alternatives to numeric codes (so they can be used as 0/1 dummies)
 alt_map <- c(car=1L, bus=2L, air=3L, rail=4L)
 
-# buat lookup untuk pilihan aktual
+# Create a lookup for the actual chosen alternative
 choice_lookup <- data_wide %>%
   transmute(
     ID,
@@ -190,3 +190,4 @@ cat(paste0("\n✅ Long-format data saved to: ", output_file, "\n"))
 # - The resulting 'long' dataset is fully compatible with Apollo.
 # - Next step: run R01_MNL_Baseline.R to estimate MNL.
 ##############################################################
+
