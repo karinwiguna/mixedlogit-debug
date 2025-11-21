@@ -19,12 +19,18 @@
 ### STEP 0 – Load packages and initialise Apollo
 ### ==========================================================
 
+## --- Hard reset error handler jadi bentuk yang benar
+options(error = function(e) {
+  # print dulu biar kelihatan kalau ada error beneran
+  print(e)
+  stop(e)  # lempar lagi errornya
+})
+
+
 library(apollo)
 library(readr)
 library(dplyr)
 library(tidyr)   # optional — only needed if reshape or clean data again
-
-options(error = NULL)
 
 apollo_initialise()
 
