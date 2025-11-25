@@ -1,62 +1,57 @@
 ##############################################################
-# R02_MMNL_Independent.R
+# R02_MMNL_Independent_Wide.R
 # ------------------------------------------------------------
 # Project   : Mode Choice Modelling with Apollo
 # Researcher: Karina
-# Date      : 30 October 2025
+# Date      : 30 October 2025 (revised wide-format version)
 #
 # Description:
-# This script estimates a Mixed Multinomial Logit (MMNL) model
-# with independent random coefficients for travel time and cost.
-# The code mirrors the baseline MNL structure and extends it
-# with Sobol draws for two normally distributed coefficients.
-# ------------------------------------------------------------
-# Dependencies: apollo, readr, dplyr, tidyr (optional)
+# Mixed Multinomial Logit (MMNL) with independent normal
+# random coefficients for travel time and cost,
+# using the ORIGINAL WIDE Apollo sample.
 ##############################################################
 
-
 ### ==========================================================
-### STEP 0 – Load packages and initialise Apollo
+### 0. LOAD PACKAGES & INITIALISE APOLLO
 ### ==========================================================
 
 library(apollo)
 library(readr)
 library(dplyr)
-library(tidyr)   # optional — only needed if reshape or clean data again
 
 apollo_initialise()
 
 apollo_control <- list(
-  modelName  = "MMNL_independent",
-  modelDescr = "Mixed Logit with independent normal coefficients",
+  modelName  = "MMNL_independent_wide",
+  modelDescr = "Mixed Logit with independent normals (wide data)",
   indivID    = "ID",
   panelData  = TRUE,
-  mixing     = TRUE,
+  mixing     = TRUE,   # IMPORTANT: we have random coefficients
   nCores     = 1
 )
 
-
 ### ==========================================================
-### STEP 1 – Read WIDE data and locate project paths
+### 1. LOAD WIDE DATA (SAME AS R01)
 ### ==========================================================
 
 get_script_path <- function(){
   p <- NULL
 
-  # Prefer the active document path when running inside RStudio
-  if (requireNamespace("rstudioapi", quietly = TRUE) && isTRUE(rstudioapi::isAvailable())) {
-    p_try <- try(rstudioapi::getActiveDocumentContext()$path, silent = TRUE)
-    if (!inherits(p_try, "try-error") && is.character(p_try) && nzchar(p_try)) p <- p_try
+  if (requireNamespace("rstudioapi", quietly = TRUE)) {
+    if (tryCatch(rstudioapi::isAvailable(), error = function(e) FALSE)) {
+      p_try <- try(rstudioapi::getActiveDocumentContext()$path, silent = TRUE)
+      if (!inherits(p_try, "try-error") && is.character(p_try) && nzchar(p_try)) {
+        p <- p_try
+      }
+    }
   }
 
-  # Fall back to --file argument when sourced via Rscript
   if (is.null(p) || !nzchar(p)) {
     args <- commandArgs(trailingOnly = FALSE)
     fileArg <- grep("^--file=", args, value = TRUE)
     if (length(fileArg) > 0) p <- sub("^--file=", "", fileArg[1])
   }
 
-  # Final fallback: current working directory
   if (is.null(p) || !nzchar(p)) {
     p <- normalizePath(".", winslash = "/", mustWork = FALSE)
   }
@@ -72,17 +67,16 @@ cat(".script_dir   : ", .script_dir, "\n")
 cat(".project_root : ", .project_root, "\n")
 
 candidate_paths <- c(
-  file.path(.script_dir,   "DATA", "processed", "modechoice_long.csv"),
-  file.path(.project_root, "DATA", "processed", "modechoice_long.csv"),
-  file.path(.script_dir,   "data", "processed", "modechoice_long.csv"),
-  file.path(.project_root, "data", "processed", "modechoice_long.csv"),
-  file.path(.script_dir,   "modechoice_long.csv"),
-  file.path(.project_root, "modechoice_long.csv")
+  file.path(.script_dir,   "DATA", "apollo_modeChoiceData.csv"),
+  file.path(.project_root, "DATA", "apollo_modeChoiceData.csv"),
+  file.path(.script_dir,   "data", "apollo_modeChoiceData.csv"),
+  file.path(.project_root, "data", "apollo_modeChoiceData.csv")
 )
+
 hit <- which(file.exists(candidate_paths))
 if (length(hit) == 0) {
   cat("Checked these paths:\n"); print(candidate_paths)
-  stop("modechoice_long.csv not found. Make sure DATA/processed is in the right place.")
+  stop("apollo_modeChoiceData.csv not found. Please put it in DATA/ next to the script.")
 }
 
 data_path <- candidate_paths[hit[1]]
@@ -90,118 +84,45 @@ cat("Using data file:\n", data_path, "\n")
 
 database <- readr::read_csv(data_path, show_col_types = FALSE)
 
-cat("\nColumns available in dataset:\n"); print(names(database))
+cat("\nColumns available in wide dataset:\n"); print(names(database))
 cat("\nMissing values summary:\n"); print(colSums(is.na(database)))
 
-
 ### ==========================================================
-### STEP 2 – Build choice variables and check consistency
-### ==========================================================
-
-alt_map <- c(car = 1L, bus = 2L, air = 3L, rail = 4L)
-
-database <- database %>%
-  mutate(alt = tolower(trimws(alt)))
-
-stopifnot("choice" %in% names(database))
-
-choice_map <- database %>%
-  group_by(ID, choice_id) %>%
-  summarise(
-    .groups    = "drop",
-    idx        = which.max(choice),
-    alt_sel    = tolower(trimws(alt[idx])),
-    choice_num = unname(alt_map[alt_sel])
-  ) %>%
-  select(ID, choice_id, choice_num)
-
-cat("Head of choice_map:\n"); print(head(choice_map))
-
-# Harmonise key types before joining
-
-database <- database %>%
-  mutate(
-    ID        = as.integer(ID),
-    choice_id = as.integer(choice_id)
-  )
-
-choice_map <- choice_map %>%
-  mutate(
-    ID        = as.integer(ID),
-    choice_id = as.integer(choice_id)
-  )
-
-database <- database %>%
-  select(-dplyr::any_of("choice_num")) %>%
-  left_join(choice_map, by = c("ID", "choice_id"), suffix = c("", ".cm"))
-
-if (("choice_num.cm" %in% names(database)) && !("choice_num" %in% names(database))) {
-  database <- database %>%
-    dplyr::rename(choice_num = `choice_num.cm`)
-}
-
-if (!("choice_num" %in% names(database))) {
-  cat("\n[DIAGNOSTIC] Missing choice_num after join.\n")
-  missing_keys <- dplyr::anti_join(
-    database %>% dplyr::distinct(ID, choice_id),
-    choice_map %>% dplyr::distinct(ID, choice_id),
-    by = c("ID", "choice_id")
-  )
-  print(head(missing_keys, 10))
-  stop("choice_num missing after join. Check that each (ID, choice_id) has a chosen alternative.")
-}
-
-if (any(is.na(database$choice_num))) {
-  bad <- database %>%
-    filter(is.na(choice_num)) %>%
-    distinct(ID, choice_id) %>%
-    head(10)
-  print(bad)
-  stop("Found NA in choice_num. Please verify the original data.")
-}
-
-database$choice_num <- as.integer(database$choice_num)
-stopifnot(!any(is.na(database$choice_num)))
-
-
-### ==========================================================
-### STEP 3 – Define starting values and fixed parameters
+### 2. STARTING VALUES (MEAN & SD OF RANDOM COEFFS)
 ### ==========================================================
 
 apollo_beta <- c(
   asc_bus    = -1.2,
   asc_air    = -0.2,
   asc_rail   =  0.3,
-  mu_time    = -0.05,
-  mu_cost    = -0.02,
-  sigma_time =  0.03,
-  sigma_cost =  0.02,
+  mu_time    = -0.05,   # mean time sensitivity
+  mu_cost    = -0.02,   # mean cost sensitivity
+  sigma_time =  0.03,   # SD of time coefficient
+  sigma_cost =  0.02,   # SD of cost coefficient
   b_access   =  0.01,
   b_service  =  0.20
 )
 
 apollo_fixed <- c()
 
-
 ### ==========================================================
-### STEP 4 – Specify simulation draws for random coefficients
+### 3. SPECIFY DRAWS FOR RANDOM COEFFS
 ### ==========================================================
 
 apollo_draws <- list(
   interDrawsType = "sobol",
-  interNDraws    = 200,
-  interNormDraws = c("draws_time", "draws_cost")
+  interNDraws    = 200,                        # boleh dinaikkan nanti
+  interNormDraws = c("draws_time", "draws_cost")  # ~ N(0,1)
 )
 
-
 ### ==========================================================
-### STEP 5 – Define random coefficients and utility functions
+### 4. RANDOM COEFFICIENTS (PER INDIVIDU)
 ### ==========================================================
 
 apollo_randCoeff <- function(apollo_beta, apollo_inputs){
   with(as.list(c(apollo_beta, apollo_inputs$draws)), {
-    b_time <- mu_time + sigma_time * draws_time
-    b_cost <- mu_cost + sigma_cost * draws_cost
+    b_time <- mu_time + sigma_time * draws_time   # N(mu_time, sigma_time^2)
+    b_cost <- mu_cost + sigma_cost * draws_cost   # N(mu_cost, sigma_cost^2)
     return(list(
       b_time = b_time,
       b_cost = b_cost
@@ -209,52 +130,78 @@ apollo_randCoeff <- function(apollo_beta, apollo_inputs){
   })
 }
 
+### ==========================================================
+### 5. PROBABILITIES – MIXED LOGIT ON WIDE DATA
+### ==========================================================
+
 apollo_probabilities <- function(apollo_beta, apollo_inputs, functionality = "estimate"){
 
   apollo_attach(apollo_beta, apollo_inputs)
   on.exit(apollo_detach(apollo_beta, apollo_inputs), add = TRUE)
 
+  # Utility functions, now using random b_time & b_cost
   V <- list()
-  V[["car"]]  = 0 + b_time  * (time   * (alt == "car")) + b_cost  * (cost   * (alt == "car"))
-  V[["bus"]]  = asc_bus + b_time  * (time   * (alt == "bus")) + b_cost  * (cost   * (alt == "bus")) + b_access* (access * (alt == "bus"))
-  V[["air"]]  = asc_air + b_time  * (time   * (alt == "air")) + b_cost  * (cost   * (alt == "air")) + b_access* (access * (alt == "air")) + b_service*(service* (alt == "air"))
-  V[["rail"]] = asc_rail + b_time  * (time   * (alt == "rail")) + b_cost  * (cost   * (alt == "rail")) + b_access* (access * (alt == "rail")) + b_service*(service* (alt == "rail"))
+  V[["car"]]  = 0 +
+    b_time * time_car +
+    b_cost * cost_car
 
-  avail_list <- list(car = 1, bus = 1, air = 1, rail = 1)
+  V[["bus"]]  = asc_bus +
+    b_time   * time_bus +
+    b_cost   * cost_bus +
+    b_access * access_bus
+
+  V[["air"]]  = asc_air +
+    b_time    * time_air +
+    b_cost    * cost_air +
+    b_access  * access_air +
+    b_service * service_air
+
+  V[["rail"]] = asc_rail +
+    b_time    * time_rail +
+    b_cost    * cost_rail +
+    b_access  * access_rail +
+    b_service * service_rail
+
+  avail_list <- list(
+    car  = av_car,
+    bus  = av_bus,
+    air  = av_air,
+    rail = av_rail
+  )
 
   mnl_settings <- list(
     alternatives = c(car = 1, bus = 2, air = 3, rail = 4),
     avail        = avail_list,
-    choiceVar    = choice_num,
+    choiceVar    = choice,
     V            = V
   )
 
   P <- list()
   P[["model"]] <- apollo_mnl(mnl_settings, functionality)
-  # Panel product over repeated observations for each individual
+
+  # Panel product across RP/SP rows per ID
   P <- apollo_panelProd(P, apollo_inputs, functionality)
-  # Mixed logit (average over draws)
+
+  # Average over inter-individual draws (mixed logit)
   P <- apollo_avgInterDraws(P, apollo_inputs, functionality)
-  # Final preparation of probabilities
+
+  # Final preparation
   P <- apollo_prepareProb(P, apollo_inputs, functionality)
-  
+
   return(P)
-  
 }
 
-
 ### ==========================================================
-### STEP 6 – Validate Apollo inputs
+### 6. VALIDATE INPUTS & PROBABILITIES
 ### ==========================================================
 
 apollo_inputs <- apollo_validateInputs()
 
 invisible(apollo_probabilities(apollo_beta, apollo_inputs, functionality = "validate"))
-cat("Validation passed for MMNL model.\n")
-
+cat("Validation passed for MMNL (wide) model.\n")
 
 ### ==========================================================
-### STEP 7 – Estimate MMNL model and save output
+### 7. ESTIMATE MIXED LOGIT
 ### ==========================================================
 
 mmnl_model <- apollo_estimate(apollo_beta, apollo_fixed,
@@ -263,5 +210,5 @@ mmnl_model <- apollo_estimate(apollo_beta, apollo_fixed,
 apollo_modelOutput(mmnl_model)
 apollo_saveOutput(mmnl_model)
 
-cat("\nMMNL estimation completed successfully.\n")
+cat("\nMMNL (wide) estimation completed successfully.\n")
 ##############################################################
