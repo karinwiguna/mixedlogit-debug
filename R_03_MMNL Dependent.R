@@ -3,64 +3,84 @@
 # ------------------------------------------------------------
 # Project   : Mode Choice Modelling with Apollo
 # Researcher: Karina
-# Date      : 30 October 2025
+# Date      : 25 November 2025
 #
 # Description:
-# Mixed Multinomial Logit (MMNL) with *correlated* (dependent)
-# random coefficients for travel time and cost, using the
-# original wide-format Apollo example data:
-#   DATA/apollo_modeChoiceData.csv
+# Mixed Multinomial Logit (MMNL) with *correlated* random
+# coefficients for travel time and cost, using the original
+# WIDE Apollo example data:
+#   apollo_modeChoiceData.csv
 #
-# Alternatives : car, bus, air, rail
-# Choice var   : choice (1=car, 2=bus, 3=air, 4=rail)
+# Alternatives: car (1), bus (2), air (3), rail (4)
+# Data columns used (wide format):
+#   ID, av_car, av_bus, av_air, av_rail,
+#   time_car, time_bus, time_air, time_rail,
+#   cost_car, cost_bus, cost_air, cost_rail,
+#   choice
+#
+# Random coefficients:
+#   b_time ~ Normal(mu_time, sigma_time^2)
+#   b_cost ~ Normal(mu_cost, sigma_cost^2)
+#   corr(b_time, b_cost) = rho   (estimated)
+#
+# Implementation follows the logic of Section 6 (random
+# heterogeneity) of the Apollo manual v0.3.6.
 ##############################################################
+
 
 ### ==========================================================
 ### STEP 0 – Load packages and initialise Apollo
 ### ==========================================================
 
+# IMPORTANT:
+# - Jangan set options(error = ...) di script ini.
+# - Pastikan tidak ada error handler custom aktif.
+
 library(apollo)
+library(readr)
+library(dplyr)
 
 apollo_initialise()
 
 apollo_control <- list(
   modelName  = "MMNL_dependent",
-  modelDescr = "Mixed Logit with correlated time & cost coefficients (wide data)",
-  indivID    = "ID",       # panel over repeated RP/SP tasks
-  panelData  = TRUE,
-  mixing     = TRUE,
-  nCores     = 5           
+  modelDescr = "Mixed Logit (time & cost, correlated normals, WIDE data)",
+  indivID    = "ID",      # panel individual ID
+  panelData  = TRUE,      # repeated choices per ID
+  mixing     = TRUE,      # we use random coefficients
+  nCores     = 4          # keep 1 core dulu supaya debugging mudah
 )
 
+
 ### ==========================================================
-### STEP 1 – Locate project paths and read WIDE data
+### STEP 1 – Locate data file and read WIDE dataset
 ### ==========================================================
 
 get_script_path <- function(){
   p <- NULL
-
-  # 1) Kalau jalan di RStudio, pakai path dokumen aktif
+  
+  # RStudio: pakai active document path kalau ada
   if (requireNamespace("rstudioapi", quietly = TRUE)) {
     if (tryCatch(rstudioapi::isAvailable(), error = function(e) FALSE)) {
-      p_try <- try(rstudioapi::getActiveDocumentContext()$path, silent = TRUE)
-      if (!inherits(p_try, "try-error") && is.character(p_try) && nzchar(p_try)) {
-        p <- p_try
-      }
+      p <- tryCatch(rstudioapi::getActiveDocumentContext()$path,
+                    error = function(e) NULL)
     }
   }
-
-  # 2) Kalau via Rscript, pakai argumen --file
+  
+  # Kalau masih NULL, coba argumen --file (Rscript)
   if (is.null(p) || !nzchar(p)) {
     args    <- commandArgs(trailingOnly = FALSE)
     fileArg <- grep("^--file=", args, value = TRUE)
-    if (length(fileArg) > 0) p <- sub("^--file=", "", fileArg[1])
+    if (length(fileArg) > 0){
+      p <- sub("^--file=", "", fileArg[1])
+    }
   }
-
-  # 3) Fallback: current working directory
+  
+  # Fallback terakhir: current working directory
   if (is.null(p) || !nzchar(p)) {
     p <- normalizePath(".", winslash = "/", mustWork = FALSE)
   }
-
+  
   normalizePath(p, winslash = "/", mustWork = FALSE)
 }
 
@@ -71,168 +91,191 @@ get_script_path <- function(){
 cat(".script_dir   : ", .script_dir, "\n")
 cat(".project_root : ", .project_root, "\n")
 
-# Cari file data dalam DATA/ atau root (wide format)
+# Cari file wide di beberapa kemungkinan lokasi:
 candidate_paths <- c(
-  file.path(.script_dir,   "DATA", "apollo_modeChoiceData.csv"),
-  file.path(.project_root, "DATA", "apollo_modeChoiceData.csv"),
   file.path(.script_dir,   "apollo_modeChoiceData.csv"),
-  file.path(.project_root, "apollo_modeChoiceData.csv")
+  file.path(.project_root, "apollo_modeChoiceData.csv"),
+  file.path(.script_dir,   "DATA", "apollo_modeChoiceData.csv"),
+  file.path(.project_root, "DATA", "apollo_modeChoiceData.csv")
 )
 
 hit <- which(file.exists(candidate_paths))
 if (length(hit) == 0) {
-  cat("Checked these paths:\n"); print(candidate_paths)
-  stop("apollo_modeChoiceData.csv not found in expected locations (DATA/ or script folder).")
+  cat("Checked these paths for apollo_modeChoiceData.csv:\n")
+  print(candidate_paths)
+  stop("apollo_modeChoiceData.csv not found. Please place it in the repo root or DATA/ folder.")
 }
 
 data_path <- candidate_paths[hit[1]]
 cat("Using data file:\n", data_path, "\n")
 
-database <- read.csv(data_path, header = TRUE)
+# === Load WIDE data (exactly as in Apollo example) ===
+database <- readr::read_csv(data_path, show_col_types = FALSE)
 
-cat("\nColumns available in dataset:\n"); print(names(database))
+cat("\nColumns in WIDE dataset:\n"); print(names(database))
 cat("\nMissing values summary:\n"); print(colSums(is.na(database)))
 
-# Pastikan choice ada dan bernilai 1..4
+# We assume choice is coded 1=car, 2=bus, 3=air, 4=rail, as in Apollo example
 stopifnot("choice" %in% names(database))
-database$choice <- as.integer(database$choice)
-stopifnot(all(database$choice %in% 1:4))
+
 
 ### ==========================================================
-### STEP 2 – Define starting values & fixed parameters
+### STEP 2 – Define parameters (starting values) & fixed params
 ### ==========================================================
 
-# Parameter tetap + mean & st.dev random coeff + korelasi
+# ASC_car dijadikan base (0), jadi tidak dimasukkan.
+# Random coefficients: b_time, b_cost (correlated normals)
 apollo_beta <- c(
-  # Asc (relative to car)
-  asc_bus      = -1.2,
-  asc_air      = -0.2,
-  asc_rail     =  0.3,
-
-  # Mean random coefficients (time & cost)
-  mu_time      = -0.05,
-  mu_cost      = -0.02,
-
-  # Std dev (heterogeneity)
-  sigma_time   =  0.03,
-  sigma_cost   =  0.02,
-
-  # Korelasi "raw" antara time & cost (nanti di-transform ke [-1,1])
-  rho_raw_tc   =  0.3,
-
-  # Deterministic coefficients
-  b_access     =  0.01,
-  b_service    =  0.20
+  asc_bus    = -1.0,
+  asc_air    = -0.3,
+  asc_rail   =  0.2,
+  
+  mu_time    = -0.05,   # mean of time coefficient
+  mu_cost    = -0.02,   # mean of cost coefficient
+  
+  sigma_time =  0.02,   # std dev of time coefficient
+  sigma_cost =  0.01,   # std dev of cost coefficient
+  
+  rho_raw    =  0       # transformed to rho in (-1,1)
 )
 
-# Semua parameter diestimasi (tidak ada yang difix)
+# Semua param kita estimasi (tidak ada yang fixed)
 apollo_fixed <- c()
 
+
 ### ==========================================================
-### STEP 3 – Simulation draws (for random coefficients)
+### STEP 3 – Simulation draws for random coefficients
 ### ==========================================================
 
+# Menggunakan inter-individual (panel) draws
 apollo_draws <- list(
-  interDrawsType = "sobol",                  # Sobol sequence
-  interNDraws    = 200,                      # bisa dinaikkan 500/1000 nanti
-  interNormDraws = c("draws_t", "draws_c")   # dua N(0,1) independen
+  interDrawsType = "sobol",                        # Sobol draws (manual section 6)
+  interNDraws    = 200,                            # bisa dinaikkan nanti (contoh: 500, 1000)
+  interNormDraws = c("draws_time", "draws_cost")   # dua standard normal draws
 )
+
 
 ### ==========================================================
 ### STEP 4 – Random coefficients with correlation
 ### ==========================================================
 
+# b_time dan b_cost ~ bivariate normal dengan korelasi rho.
+# Implementasi standard (sesuai Train dan manual Apollo):
+#   z1 = draws_time ~ N(0,1)
+#   z2 = draws_cost ~ N(0,1) independent
+#   b_time = mu_time + sigma_time * z1
+#   b_cost = mu_cost + sigma_cost * ( rho * z1 + sqrt(1 - rho^2) * z2 )
+
 apollo_randCoeff <- function(apollo_beta, apollo_inputs){
-  # apollo_inputs$draws berisi draws_t & draws_c (N(0,1) Sobol)
-  with(as.list(c(apollo_beta, apollo_inputs$draws)), {
-
-    # Transformasi rho_raw_tc -> rho_tc di [-1,1] pakai tanh
-    rho_tc <- tanh(rho_raw_tc)
-
-    # b_time ~ N(mu_time, sigma_time^2)
-    b_time <- mu_time + sigma_time * draws_t
-
-    # b_cost = mu_cost + sigma_cost * (rho * draws_t + sqrt(1-rho^2) * draws_c)
-    # Ini implementasi korelasi standar untuk dua Normal
-    b_cost <- mu_cost + sigma_cost * (rho_tc * draws_t + sqrt(1 - rho_tc^2) * draws_c)
-
-    return(list(
-      b_time = b_time,
-      b_cost = b_cost
-    ))
-  })
+  
+  # akses parameter (mu, sigma, rho_raw) dan draws (draws_time, draws_cost)
+  par   <- as.list(apollo_beta)
+  draws <- apollo_inputs$draws
+  
+  mu_time    <- par$mu_time
+  mu_cost    <- par$mu_cost
+  sigma_time <- par$sigma_time
+  sigma_cost <- par$sigma_cost
+  
+  # transform rho_raw --> rho in (-1,1) pakai fungsi logistic
+  rho_raw <- par$rho_raw
+  rho     <- 2 * plogis(rho_raw) - 1   # rho = 2*logit^-1(rho_raw) - 1
+  
+  z1 <- draws$draws_time   # N(0,1)
+  z2 <- draws$draws_cost   # N(0,1), independent
+  
+  b_time <- mu_time + sigma_time * z1
+  b_cost <- mu_cost + sigma_cost * ( rho * z1 + sqrt(1 - rho^2) * z2 )
+  
+  return(list(
+    b_time = b_time,
+    b_cost = b_cost
+  ))
 }
 
+
 ### ==========================================================
-### STEP 5 – Utility functions & probability structure
+### STEP 5 – Define utility functions & likelihood
 ### ==========================================================
 
 apollo_probabilities <- function(apollo_beta, apollo_inputs, functionality = "estimate"){
-
+  
+  # Attach:
   apollo_attach(apollo_beta, apollo_inputs)
   on.exit(apollo_detach(apollo_beta, apollo_inputs), add = TRUE)
-
-  # Utility per alternatif (pakai variabel WIDE: time_car, cost_car, dst.)
+  
+  # --------------------------------------------------------
+  # 5.1 Utility functions in WIDE format
+  # --------------------------------------------------------
   V <- list()
-
+  
+  # car (base ASC = 0)
   V[["car"]]  <- 0 +
-    b_time * time_car  +
+    b_time * time_car +
     b_cost * cost_car
-
+  
+  # bus
   V[["bus"]]  <- asc_bus +
-    b_time * time_bus  +
-    b_cost * cost_bus  +
-    b_access  * access_bus
-
+    b_time * time_bus +
+    b_cost * cost_bus
+  
+  # air
   V[["air"]]  <- asc_air +
-    b_time * time_air  +
-    b_cost * cost_air  +
-    b_access  * access_air +
-    b_service * service_air
-
+    b_time * time_air +
+    b_cost * cost_air
+  
+  # rail
   V[["rail"]] <- asc_rail +
     b_time * time_rail +
-    b_cost * cost_rail +
-    b_access  * access_rail +
-    b_service * service_rail
-
-  # Availability (pakai av_car, av_bus, ...)
+    b_cost * cost_rail
+  
+  # --------------------------------------------------------
+  # 5.2 Availability
+  # --------------------------------------------------------
   avail <- list(
     car  = av_car,
     bus  = av_bus,
     air  = av_air,
     rail = av_rail
   )
-
+  
+  # --------------------------------------------------------
+  # 5.3 MNL kernel inside Mixed Logit
+  # --------------------------------------------------------
   mnl_settings <- list(
     alternatives = c(car = 1, bus = 2, air = 3, rail = 4),
     avail        = avail,
-    choiceVar    = choice,   # sudah numeric 1..4
-    V            = V
+    choiceVar    = choice,
+    V            = V,
+    componentName = "MNL"
   )
-
+  
   P <- list()
   P[["model"]] <- apollo_mnl(mnl_settings, functionality)
-
-  # Panel product (karena tiap ID punya beberapa RP/SP tasks)
+  
+  # Panel product over repeated choice situations for each ID
   P <- apollo_panelProd(P, apollo_inputs, functionality)
-
-  # Rata-rata atas draws → mixed logit
+  
+  # Average over inter-individual draws (Mixed Logit)
   P <- apollo_avgInterDraws(P, apollo_inputs, functionality)
-
-  # Final preparation
+  
+  # Prepare final probabilities
   P <- apollo_prepareProb(P, apollo_inputs, functionality)
-
+  
   return(P)
 }
+
 
 ### ==========================================================
 ### STEP 6 – Validate inputs
 ### ==========================================================
 
 apollo_inputs <- apollo_validateInputs()
+
+# Optional quick validation run
 invisible(apollo_probabilities(apollo_beta, apollo_inputs, functionality = "validate"))
-cat("Validation passed for MMNL dependent model.\n")
+cat("Validation passed for MMNL_dependent.\n")
+
 
 ### ==========================================================
 ### STEP 7 – Estimate & save output
@@ -248,5 +291,5 @@ mmnl_dep_model <- apollo_estimate(
 apollo_modelOutput(mmnl_dep_model)
 apollo_saveOutput(mmnl_dep_model)
 
-cat("\nMMNL dependent estimation completed.\n")
+cat("\nMMNL_dependent estimation completed.\n")
 ##############################################################
