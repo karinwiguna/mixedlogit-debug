@@ -53,11 +53,11 @@ main <- function() {
   }
 
   ## STEP 2.4 – Run baseline MNL (wide data)
-  message("==> Running R01_MNL_Baseline_Wide.R")
+  message("==> Running R01_MNL_Baseline.R")
   source("R01_MNL_Baseline.R", local = FALSE)
 
   ## STEP 2.5 – Run MMNL independent (wide data)
-  message("==> Running R02_MMNL_Independent_Wide.R")
+  message("==> Running R02_MMNL_Independent.R")
   source("R02_MMNL_Independent.R", local = FALSE)
 
   ## STEP 2.6 – Run MMNL dependent (wide data)
