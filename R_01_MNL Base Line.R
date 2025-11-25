@@ -3,7 +3,7 @@
 # ------------------------------------------------------------
 # Project   : Mode Choice Modelling with Apollo
 # Researcher: Karina
-# Date      : 30 October 2025 (revised wide-format version)
+# Date      : 30 October 2025 (revised wide-format version 25 November 2025)
 #
 # Description:
 # Baseline Multinomial Logit (MNL) using Apollo,
@@ -191,3 +191,4 @@ apollo_saveOutput(mnl_model)
 
 cat("\nMNL (wide) estimation completed successfully.\n")
 ##############################################################
+
