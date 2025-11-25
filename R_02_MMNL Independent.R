@@ -27,7 +27,7 @@ apollo_control <- list(
   indivID    = "ID",
   panelData  = TRUE,
   mixing     = TRUE,   # IMPORTANT: we have random coefficients
-  nCores     = 1
+  nCores     = 5
 )
 
 ### ==========================================================
