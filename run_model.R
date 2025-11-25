@@ -1,14 +1,12 @@
 #!/usr/bin/env Rscript
 
 ## STEP 0 – Initialise environment
-# Start the script quietly so it can be run from the command line without
-# printing library attachment messages.
 suppressPackageStartupMessages({
   library(utils)
 })
 
-## STEP 1 – Define helper utilities
-# Utility helpers are defined once and reused by the main routine.
+## STEP 1 – Helper utilities ---------------------------------------------------
+
 get_script_dir <- function() {
   args <- commandArgs(trailingOnly = FALSE)
   file_arg <- "--file="
@@ -26,53 +24,49 @@ check_packages <- function(pkgs) {
   }
 }
 
-## STEP 2 – Run the orchestration routine
-# The main routine aligns working directories, validates dependencies, and
-# invokes each script in sequence.
+## STEP 2 – Main orchestration --------------------------------------------------
+
 main <- function() {
-  ## STEP 2.1 – Align working directory with repository root
+  ## STEP 2.1 – Set working directory to repo root
   repo_dir <- get_script_dir()
   setwd(repo_dir)
 
-  ## STEP 2.2 – Check required R packages
-  required_pkgs <- c("apollo", "data.table", "dplyr", "readr", "tidyr")
+  ## STEP 2.2 – Check required packages
+  required_pkgs <- c("apollo", "readr", "dplyr")
   check_packages(required_pkgs)
 
-  ## STEP 2.3 – Ensure data directories exist and seed raw input
+  ## STEP 2.3 – Ensure data file exists in expected location
   data_dir <- file.path(repo_dir, "DATA")
-  processed_dir <- file.path(data_dir, "processed")
   if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
-  if (!dir.exists(processed_dir)) dir.create(processed_dir, recursive = TRUE)
 
-  raw_source <- file.path(repo_dir, "apollo_modeChoiceData.csv")
-  raw_target <- file.path(data_dir, "apollo_modeChoiceData.csv")
-  if (!file.exists(raw_source)) {
-    stop("Unable to locate 'apollo_modeChoiceData.csv' in the repository root.")
-  }
-  if (!file.exists(raw_target)) {
-    file.copy(raw_source, raw_target, overwrite = FALSE)
+  raw_root   <- file.path(repo_dir, "apollo_modeChoiceData.csv")
+  raw_inDATA <- file.path(data_dir, "apollo_modeChoiceData.csv")
+
+  if (!file.exists(raw_root) && !file.exists(raw_inDATA)) {
+    stop("Unable to locate 'apollo_modeChoiceData.csv' ",
+         "in repo root or DATA/. Please add the file first.")
   }
 
-  ## STEP 2.4 – Run preprocessing script to build the long-format data
-  message("==> Running data processing (R00_Data Processing.R)")
-  source("R00_Data Processing.R", local = FALSE)
+  # Kalau file utama ada di root tapi belum ada di DATA, copy sebagai backup
+  if (file.exists(raw_root) && !file.exists(raw_inDATA)) {
+    file.copy(raw_root, raw_inDATA, overwrite = FALSE)
+  }
 
-  ## STEP 2.5 – Estimate the independent MMNL model
-  message("==> Running MMNL estimation (R_02_MMNL Independent.R)")
-  autorun_old <- getOption("mmnl.skip.autorun")
-  on.exit(options(mmnl.skip.autorun = autorun_old), add = TRUE)
-  options(mmnl.skip.autorun = TRUE)
-  source("R_02_MMNL Independent.R", local = FALSE)
-  options(mmnl.skip.autorun = autorun_old)
-  results <- mmnl_model(
-    processed_path = file.path("DATA", "processed", "modechoice_long.csv"),
-    output_dir = "output"
-  )
+  ## STEP 2.4 – Run baseline MNL (wide data)
+  message("==> Running R01_MNL_Baseline_Wide.R")
+  source("R01_MNL_Baseline.R", local = FALSE)
 
-  ## STEP 2.6 – Report completion status to the console
-  message(sprintf("==> Estimation finished. Summary written to %s", results$summary_path))
+  ## STEP 2.5 – Run MMNL independent (wide data)
+  message("==> Running R02_MMNL_Independent_Wide.R")
+  source("R02_MMNL_Independent.R", local = FALSE)
+
+  ## STEP 2.6 – Run MMNL dependent (wide data)
+  message("==> Running R03_MMNL_Dependent.R")
+  source("R03_MMNL_Dependent_Wide.R", local = FALSE)
+
+  ## STEP 2.7 – Done
+  message("==> All models (R01, R02, R03) finished running.")
 }
 
-## STEP 3 – Execute pipeline
-# Run the orchestration routine directly so any Apollo errors surface clearly.
+## STEP 3 – Execute pipeline ----------------------------------------------------
 main()
