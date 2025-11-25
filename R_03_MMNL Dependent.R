@@ -29,7 +29,7 @@ apollo_control <- list(
   indivID    = "ID",       # panel over repeated RP/SP tasks
   panelData  = TRUE,
   mixing     = TRUE,
-  nCores     = 1           
+  nCores     = 5           
 )
 
 ### ==========================================================
