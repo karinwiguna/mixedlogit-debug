@@ -53,16 +53,16 @@ main <- function() {
   }
 
   ## STEP 2.4 – Run baseline MNL (wide data)
-  message("==> Running R01_MNL_Baseline.R")
-  source("R01_MNL_Baseline.R", local = FALSE)
+  message("==> Running R_01_MNL_Baseline.R")
+  source("R_01_MNL_Baseline.R", local = FALSE)
 
   ## STEP 2.5 – Run MMNL independent (wide data)
-  message("==> Running R02_MMNL_Independent.R")
-  source("R02_MMNL_Independent.R", local = FALSE)
+  message("==> Running R_02_MMNL_Independent.R")
+  source("R_02_MMNL_Independent.R", local = FALSE)
 
   ## STEP 2.6 – Run MMNL dependent (wide data)
-  message("==> Running R03_MMNL_Dependent.R")
-  source("R03_MMNL_Dependent_Wide.R", local = FALSE)
+  message("==> Running R_03_MMNL_Dependent.R")
+  source("R_03_MMNL_Dependent_Wide.R", local = FALSE)
 
   ## STEP 2.7 – Done
   message("==> All models (R01, R02, R03) finished running.")
