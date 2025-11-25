@@ -47,7 +47,7 @@ main <- function() {
          "in repo root or DATA/. Please add the file first.")
   }
 
-  # Kalau file utama ada di root tapi belum ada di DATA, copy sebagai backup
+  # If the main file exists in the root but is not yet in DATA, copy it as a backup.
   if (file.exists(raw_root) && !file.exists(raw_inDATA)) {
     file.copy(raw_root, raw_inDATA, overwrite = FALSE)
   }
